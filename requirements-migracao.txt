@@ -1,0 +1,4 @@
+# Dependência extra, usada só para rodar o script de migração
+# (python manage.py migrar_firestore). Não precisa entrar no requirements.txt
+# de produção — o Railway não precisa dela para servir a API.
+firebase-admin==6.5.0
