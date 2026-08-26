@@ -178,12 +178,38 @@ def notificar_devolvido(pedido):
         ja_notificados.add(gestor.id)
 
 
-def notificar_prazo_estendido(pedido):
+def notificar_prazo_estendido(pedido, motivo='', prazo_anterior=None):
+    """Ao estender o prazo de devolução: avisa quem solicitou (com a nova
+    data) e os gestores do MG concedente — é o armazém deles que segue
+    aguardando o material de volta."""
+    partes = [f'A devolução de "{pedido.produto}" foi adiada']
+    if pedido.dev_iso:
+        partes.append(f' para {_fmt_data(pedido.dev_iso)}')
+    partes.append('.')
+    if prazo_anterior:
+        partes.append(f' Prazo anterior: {_fmt_data(prazo_anterior)}.')
+    if motivo:
+        partes.append(f' Motivo: {motivo}.')
+    msg = ''.join(partes)
+
+    ja_notificados = set()
     _criar(
         pedido.solicitante, 'sistema',
         f'Prazo estendido — {pedido.produto}',
-        f'A devolução de "{pedido.produto}" foi adiada' + (
-            f' para {_fmt_data(pedido.dev_iso)}.' if pedido.dev_iso else '.'
-        ),
-        pedido.id, pedido=pedido,
+        msg, pedido.id, pedido=pedido,
     )
+    if pedido.solicitante_id:
+        ja_notificados.add(pedido.solicitante_id)
+
+    for gestor in _gestores_do_mg(pedido.mg_concedente):
+        if gestor.id in ja_notificados:
+            continue
+        _criar(
+            gestor, 'sistema',
+            f'Prazo estendido — {pedido.mg_concedente}',
+            f'O prazo de devolução de "{pedido.produto}" ({pedido.solicitante_nome or "—"}) foi estendido' + (
+                f' para {_fmt_data(pedido.dev_iso)}.' if pedido.dev_iso else '.'
+            ),
+            pedido.id, pedido=pedido,
+        )
+        ja_notificados.add(gestor.id)

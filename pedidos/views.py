@@ -204,15 +204,36 @@ class EstenderPedidoView(APIView):
             pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
         except Pedido.DoesNotExist:
             return Response({'detail': 'Não encontrado.'}, status=404)
-        nova_data = request.data.get('devISO')
-        if not nova_data:
-            return Response({'detail': 'devISO obrigatório.'}, status=400)
-        data_convertida = parse_date(nova_data)
-        if not data_convertida:
-            return Response({'detail': 'devISO inválido, use o formato AAAA-MM-DD.'}, status=400)
+
+        prazo_anterior = pedido.dev_iso
+
+        # Aceita tanto "dias" (quantos dias extras a partir do prazo atual —
+        # usado pelo formulário novo) quanto "devISO" (data exata, mantido
+        # por compatibilidade com chamadas antigas).
+        dias = request.data.get('dias')
+        nova_data_str = request.data.get('devISO')
+
+        if dias not in (None, ''):
+            try:
+                dias_int = int(dias)
+            except (TypeError, ValueError):
+                return Response({'detail': '"dias" deve ser um número inteiro.'}, status=400)
+            if dias_int < 1:
+                return Response({'detail': '"dias" deve ser maior que zero.'}, status=400)
+            base = pedido.dev_iso or timezone.now().date()
+            data_convertida = base + timezone.timedelta(days=dias_int)
+        elif nova_data_str:
+            data_convertida = parse_date(nova_data_str)
+            if not data_convertida:
+                return Response({'detail': 'devISO inválido, use o formato AAAA-MM-DD.'}, status=400)
+        else:
+            return Response({'detail': 'Informe "dias" ou "devISO".'}, status=400)
+
+        motivo = (request.data.get('motivo') or '').strip()
+
         pedido.dev_iso = data_convertida
         pedido.save()
-        notificar_prazo_estendido(pedido)
+        notificar_prazo_estendido(pedido, motivo=motivo, prazo_anterior=prazo_anterior)
         return Response(PedidoSerializer(pedido).data)
 
 
