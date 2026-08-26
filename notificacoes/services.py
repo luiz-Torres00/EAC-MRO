@@ -213,3 +213,53 @@ def notificar_prazo_estendido(pedido, motivo='', prazo_anterior=None):
             pedido.id, pedido=pedido,
         )
         ja_notificados.add(gestor.id)
+
+
+def notificar_ocorrencia_aberta(pedido):
+    """Ao registrar uma ocorrência (avaria, perda, atraso, incompleto…) —
+    seja junto da devolução ou, agora, a qualquer momento pelo botão
+    "Abrir ocorrência" — avisa os gestores do MG concedente, já que é o
+    armazém deles que fica no prejuízo/atraso."""
+    tipo      = (pedido.ocorrencia or {}).get('tipo', '—')
+    descricao = (pedido.ocorrencia or {}).get('descricao', '')
+    msg = f'Ocorrência registrada em "{pedido.produto}" ({pedido.solicitante_nome or "—"}): {tipo}.'
+    if descricao:
+        msg += f' {descricao}'
+
+    ja_notificados = set()
+    for gestor in _gestores_do_mg(pedido.mg_concedente):
+        _criar(
+            gestor, 'sistema',
+            f'Ocorrência — {pedido.mg_concedente}',
+            msg, pedido.id, pedido=pedido,
+        )
+        ja_notificados.add(gestor.id)
+
+    if pedido.concedente_id and pedido.concedente_id not in ja_notificados:
+        _criar(pedido.concedente, 'sistema', f'Ocorrência — {pedido.produto}', msg, pedido.id, pedido=pedido)
+
+
+def notificar_cobranca_devolucao(pedido, tom='gentil', mensagem=''):
+    """Envia a cobrança de devolução (mensagem redigida no modal, com o tom
+    escolhido) pro solicitante, e avisa os gestores do MG concedente que a
+    cobrança foi enviada — visibilidade de que o material ainda não voltou."""
+    TITULO_TOM = {
+        'gentil':  'Lembrete de devolução',
+        'formal':  'Cobrança de devolução',
+        'urgente': 'Cobrança urgente de devolução',
+    }
+    titulo = f'{TITULO_TOM.get(tom, "Cobrança de devolução")} — {pedido.produto}'
+
+    _criar(pedido.solicitante, 'sistema', titulo, mensagem, pedido.id, pedido=pedido)
+
+    ja_notificados = {pedido.solicitante_id} if pedido.solicitante_id else set()
+    for gestor in _gestores_do_mg(pedido.mg_concedente):
+        if gestor.id in ja_notificados:
+            continue
+        _criar(
+            gestor, 'sistema',
+            f'Cobrança de devolução enviada — {pedido.mg_concedente}',
+            f'Foi enviada uma cobrança de devolução para {pedido.solicitante_nome or "—"} referente a "{pedido.produto}", que ainda não foi devolvido.',
+            pedido.id, pedido=pedido,
+        )
+        ja_notificados.add(gestor.id)

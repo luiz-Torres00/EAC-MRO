@@ -11,7 +11,11 @@ from .relatorio import gerar_relatorio_xlsx
 from notificacoes.services import (
     notificar_novo_pedido, notificar_aprovado, notificar_recusado,
     notificar_devolvido, notificar_prazo_estendido,
+    notificar_ocorrencia_aberta, notificar_cobranca_devolucao,
 )
+
+TIPOS_OCORRENCIA_VALIDOS = {'Avaria', 'Perda', 'Atraso', 'Incompleto', 'Outro'}
+TONS_COBRANCA_VALIDOS    = {'gentil', 'formal', 'urgente'}
 
 
 def _visivel_para(user, qs):
@@ -234,6 +238,70 @@ class EstenderPedidoView(APIView):
         pedido.dev_iso = data_convertida
         pedido.save()
         notificar_prazo_estendido(pedido, motivo=motivo, prazo_anterior=prazo_anterior)
+        return Response(PedidoSerializer(pedido).data)
+
+
+class AbrirOcorrenciaView(APIView):
+    """PATCH /api/pedidos/<id>/ocorrencia/
+
+    Registra uma ocorrência (atraso, avaria, perda, item incompleto…) num
+    pedido a qualquer momento — diferente do registro de ocorrência feito
+    junto da devolução (ModalDevolver), este pode ser usado enquanto o
+    material ainda está em posse do solicitante, ex.: pra sinalizar
+    formalmente que passou do prazo. Alimenta a "Taxa de ocorrência" do
+    relatório, que já lê o campo `ocorrencia` do pedido.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
+        except Pedido.DoesNotExist:
+            return Response({'detail': 'Não encontrado.'}, status=404)
+
+        if pedido.status in ('recusado', 'cancelado'):
+            return Response({'detail': 'Não é possível registrar ocorrência num pedido recusado/cancelado.'}, status=400)
+
+        tipo = (request.data.get('tipo') or '').strip()
+        if tipo not in TIPOS_OCORRENCIA_VALIDOS:
+            return Response({'detail': f'"tipo" deve ser um de: {", ".join(sorted(TIPOS_OCORRENCIA_VALIDOS))}.'}, status=400)
+        descricao = (request.data.get('descricao') or '').strip()
+
+        pedido.ocorrencia = {'tipo': tipo, 'descricao': descricao}
+        pedido.save()
+        notificar_ocorrencia_aberta(pedido)
+        return Response(PedidoSerializer(pedido).data)
+
+
+class CobrarDevolucaoView(APIView):
+    """POST /api/pedidos/<id>/cobrar/
+
+    Envia uma cobrança de devolução ao solicitante — só permitido quando o
+    pedido está de fato em atraso (ainda em posse de alguém e com o prazo
+    de devolução já vencido), pra não virar um botão de "lembrete" genérico
+    e sim algo com peso de cobrança real.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        try:
+            pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
+        except Pedido.DoesNotExist:
+            return Response({'detail': 'Não encontrado.'}, status=404)
+
+        if pedido.status not in ('aprovado', 'aguardando_devolucao'):
+            return Response({'detail': 'Só é possível cobrar devolução de pedidos que ainda estão em posse do solicitante.'}, status=400)
+        if not pedido.dev_iso or pedido.dev_iso >= timezone.now().date():
+            return Response({'detail': 'Este pedido ainda não está em atraso.'}, status=400)
+
+        tom = (request.data.get('tom') or 'gentil').strip().lower()
+        if tom not in TONS_COBRANCA_VALIDOS:
+            tom = 'gentil'
+        mensagem = (request.data.get('mensagem') or '').strip()
+        if not mensagem:
+            return Response({'detail': 'Informe a mensagem da cobrança.'}, status=400)
+
+        notificar_cobranca_devolucao(pedido, tom=tom, mensagem=mensagem)
         return Response(PedidoSerializer(pedido).data)
 
 

@@ -51,6 +51,7 @@ def gerar_relatorio_xlsx(pedidos_qs, periodo_label, usuario_nome):
     devolvidos  = pedidos_qs.filter(status='devolvido').count()
     cancelados  = pedidos_qs.filter(status__in=['cancelado', 'recusado']).count()
     ocorrencias = pedidos_qs.exclude(ocorrencia__isnull=True).exclude(ocorrencia={}).count()
+    taxa_ocorrencia = (ocorrencias / total * 100) if total else 0
 
     ws['A1'] = 'Controle Dressing · MRO — Relatório de Empréstimos'
     ws['A1'].font = Font(bold=True, size=13, color=AZUL)
@@ -70,6 +71,7 @@ def gerar_relatorio_xlsx(pedidos_qs, periodo_label, usuario_nome):
         ('Devolvidos', devolvidos),
         ('Cancelados', cancelados),
         ('Ocorrências', ocorrencias),
+        ('Taxa de ocorrência', f'{taxa_ocorrencia:.1f}%'),
     ]
     for i, (label, valor) in enumerate(indicadores, start=7):
         ws[f'A{i}'] = label

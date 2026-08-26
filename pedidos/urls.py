@@ -3,6 +3,7 @@ from .views import (
     PedidoListCreateView, PedidoDetailView,
     AprovarPedidoView, RecusarPedidoView,
     DevolverPedidoView, EstenderPedidoView,
+    AbrirOcorrenciaView, CobrarDevolucaoView,
     RelatorioXlsxView,
 )
 
@@ -14,4 +15,6 @@ urlpatterns = [
     path('<int:pk>/recusar/',     RecusarPedidoView.as_view(),    name='pedido-recusar'),
     path('<int:pk>/devolver/',    DevolverPedidoView.as_view(),   name='pedido-devolver'),
     path('<int:pk>/estender/',    EstenderPedidoView.as_view(),   name='pedido-estender'),
+    path('<int:pk>/ocorrencia/',  AbrirOcorrenciaView.as_view(),  name='pedido-ocorrencia'),
+    path('<int:pk>/cobrar/',      CobrarDevolucaoView.as_view(),  name='pedido-cobrar'),
 ]
