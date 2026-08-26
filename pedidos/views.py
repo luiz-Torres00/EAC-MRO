@@ -19,12 +19,12 @@ TONS_COBRANCA_VALIDOS    = {'gentil', 'formal', 'urgente'}
 
 
 def _visivel_para(user, qs):
-    """Restringe a visibilidade de pedidos por MG (armazém/setor): cada
-    pessoa só vê os pedidos que envolvem o MG dela — como solicitante ou
-    concedente — ou dos quais ela é diretamente uma das partes. Ex.: alguém
+    """Restringe a visibilidade de pedidos por MG (armazÃ©m/setor): cada
+    pessoa sÃ³ vÃª os pedidos que envolvem o MG dela â€” como solicitante ou
+    concedente â€” ou dos quais ela Ã© diretamente uma das partes. Ex.: alguÃ©m
     do MG3 que emprestou material para o MG1 continua vendo esse pedido (ela
-    é a concedente, tem o MG dela envolvido), e quem está no MG1 também vê
-    (é o solicitante). Administradores (is_staff) sempre veem tudo.
+    Ã© a concedente, tem o MG dela envolvido), e quem estÃ¡ no MG1 tambÃ©m vÃª
+    (Ã© o solicitante). Administradores (is_staff) sempre veem tudo.
     """
     if not user or not getattr(user, 'is_authenticated', False) or user.is_staff:
         return qs
@@ -38,8 +38,8 @@ def _visivel_para(user, qs):
 
 class PedidoListCreateView(generics.ListCreateAPIView):
     """
-    GET  /api/pedidos/        — lista com filtros: status, busca, mg, período
-    POST /api/pedidos/        — cria novo pedido
+    GET  /api/pedidos/        â€” lista com filtros: status, busca, mg, perÃ­odo
+    POST /api/pedidos/        â€” cria novo pedido
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -66,16 +66,16 @@ class PedidoListCreateView(generics.ListCreateAPIView):
                 Q(numero_pedido__icontains=q)     |
                 Q(codigo__icontains=q)
             )
-        # Filtro por MG (armazém) — usado pelo filtro avançado dos Relatórios.
+        # Filtro por MG (armazÃ©m) â€” usado pelo filtro avanÃ§ado dos RelatÃ³rios.
         # Considera tanto o MG solicitante quanto o concedente, pois um
-        # empréstimo entre dois MGs diferentes deve aparecer pros dois.
+        # emprÃ©stimo entre dois MGs diferentes deve aparecer pros dois.
         mg = self.request.query_params.get('mg')
         if mg:
             from django.db.models import Q
             qs = qs.filter(Q(mg_solicitante=mg) | Q(mg_concedente=mg))
-        # Filtro por intervalo de datas explícito (calendário dos Relatórios)
-        # — tem prioridade sobre o filtro de período em dias, se os dois
-        # vierem preenchidos o intervalo explícito é o que vale.
+        # Filtro por intervalo de datas explÃ­cito (calendÃ¡rio dos RelatÃ³rios)
+        # â€” tem prioridade sobre o filtro de perÃ­odo em dias, se os dois
+        # vierem preenchidos o intervalo explÃ­cito Ã© o que vale.
         data_inicio = self.request.query_params.get('data_inicio')
         data_fim    = self.request.query_params.get('data_fim')
         if data_inicio and data_fim:
@@ -83,7 +83,7 @@ class PedidoListCreateView(generics.ListCreateAPIView):
             if di and df:
                 qs = qs.filter(criado_em__date__gte=di, criado_em__date__lte=df)
         else:
-            # Filtro por período (dias), só se não veio um intervalo explícito.
+            # Filtro por perÃ­odo (dias), sÃ³ se nÃ£o veio um intervalo explÃ­cito.
             periodo = self.request.query_params.get('periodo')
             if periodo:
                 try:
@@ -108,12 +108,12 @@ class PedidoDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     GET/PATCH/DELETE /api/pedidos/<id>/
 
-    Depois de criado, um pedido não pode mais ter seus dados de controle
-    alterados por aqui (solicitante, concedente, MG, datas, materiais…) —
-    essa é uma regra de negócio, não só de UI. As mudanças de status
+    Depois de criado, um pedido nÃ£o pode mais ter seus dados de controle
+    alterados por aqui (solicitante, concedente, MG, datas, materiaisâ€¦) â€”
+    essa Ã© uma regra de negÃ³cio, nÃ£o sÃ³ de UI. As mudanÃ§as de status
     (aprovar/recusar/devolver/estender) continuam acontecendo pelas views
-    próprias abaixo, que não passam por este PATCH. O único campo editável
-    livremente é o número do pedido (identificador externo/manual).
+    prÃ³prias abaixo, que nÃ£o passam por este PATCH. O Ãºnico campo editÃ¡vel
+    livremente Ã© o nÃºmero do pedido (identificador externo/manual).
     """
     permission_classes = [permissions.IsAuthenticated]
     serializer_class   = PedidoSerializer
@@ -131,10 +131,10 @@ class PedidoDetailView(generics.RetrieveUpdateDestroyAPIView):
         return Response(serializer.data)
 
     def delete(self, request, *args, **kwargs):
-        # Só admin pode excluir — usado pra limpar pedidos de teste sem
-        # deixar qualquer usuário apagar histórico real.
+        # SÃ³ admin pode excluir â€” usado pra limpar pedidos de teste sem
+        # deixar qualquer usuÃ¡rio apagar histÃ³rico real.
         if not request.user.is_staff:
-            return Response({'detail': 'Só administradores podem excluir pedidos.'}, status=403)
+            return Response({'detail': 'SÃ³ administradores podem excluir pedidos.'}, status=403)
         return super().delete(request, *args, **kwargs)
 
 
@@ -146,12 +146,12 @@ class AprovarPedidoView(APIView):
         try:
             pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
         except Pedido.DoesNotExist:
-            return Response({'detail': 'Não encontrado.'}, status=404)
+            return Response({'detail': 'NÃ£o encontrado.'}, status=404)
         pedido.status  = 'aprovado'
-        # request.data['devISO'] chega como string ('YYYY-MM-DD') — precisa
-        # converter pra date de verdade, senão o campo fica com uma string
-        # "solta" no model até o próximo reload do banco, e qualquer código
-        # que espere um date (ex.: .strftime() no e-mail de notificação)
+        # request.data['devISO'] chega como string ('YYYY-MM-DD') â€” precisa
+        # converter pra date de verdade, senÃ£o o campo fica com uma string
+        # "solta" no model atÃ© o prÃ³ximo reload do banco, e qualquer cÃ³digo
+        # que espere um date (ex.: .strftime() no e-mail de notificaÃ§Ã£o)
         # quebra com AttributeError.
         nova_data = request.data.get('devISO')
         if nova_data:
@@ -171,7 +171,7 @@ class RecusarPedidoView(APIView):
         try:
             pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
         except Pedido.DoesNotExist:
-            return Response({'detail': 'Não encontrado.'}, status=404)
+            return Response({'detail': 'NÃ£o encontrado.'}, status=404)
         pedido.status    = 'recusado'
         pedido.observacao = request.data.get('motivo', '')
         pedido.save()
@@ -187,7 +187,7 @@ class DevolverPedidoView(APIView):
         try:
             pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
         except Pedido.DoesNotExist:
-            return Response({'detail': 'Não encontrado.'}, status=404)
+            return Response({'detail': 'NÃ£o encontrado.'}, status=404)
         pedido.status      = 'devolvido'
         pedido.devolvido_em = timezone.now()
         if request.data.get('observacao'):
@@ -207,12 +207,12 @@ class EstenderPedidoView(APIView):
         try:
             pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
         except Pedido.DoesNotExist:
-            return Response({'detail': 'Não encontrado.'}, status=404)
+            return Response({'detail': 'NÃ£o encontrado.'}, status=404)
 
         prazo_anterior = pedido.dev_iso
 
-        # Aceita tanto "dias" (quantos dias extras a partir do prazo atual —
-        # usado pelo formulário novo) quanto "devISO" (data exata, mantido
+        # Aceita tanto "dias" (quantos dias extras a partir do prazo atual â€”
+        # usado pelo formulÃ¡rio novo) quanto "devISO" (data exata, mantido
         # por compatibilidade com chamadas antigas).
         dias = request.data.get('dias')
         nova_data_str = request.data.get('devISO')
@@ -221,7 +221,7 @@ class EstenderPedidoView(APIView):
             try:
                 dias_int = int(dias)
             except (TypeError, ValueError):
-                return Response({'detail': '"dias" deve ser um número inteiro.'}, status=400)
+                return Response({'detail': '"dias" deve ser um nÃºmero inteiro.'}, status=400)
             if dias_int < 1:
                 return Response({'detail': '"dias" deve ser maior que zero.'}, status=400)
             base = pedido.dev_iso or timezone.now().date()
@@ -229,7 +229,7 @@ class EstenderPedidoView(APIView):
         elif nova_data_str:
             data_convertida = parse_date(nova_data_str)
             if not data_convertida:
-                return Response({'detail': 'devISO inválido, use o formato AAAA-MM-DD.'}, status=400)
+                return Response({'detail': 'devISO invÃ¡lido, use o formato AAAA-MM-DD.'}, status=400)
         else:
             return Response({'detail': 'Informe "dias" ou "devISO".'}, status=400)
 
@@ -244,12 +244,12 @@ class EstenderPedidoView(APIView):
 class AbrirOcorrenciaView(APIView):
     """PATCH /api/pedidos/<id>/ocorrencia/
 
-    Registra uma ocorrência (atraso, avaria, perda, item incompleto…) num
-    pedido a qualquer momento — diferente do registro de ocorrência feito
-    junto da devolução (ModalDevolver), este pode ser usado enquanto o
-    material ainda está em posse do solicitante, ex.: pra sinalizar
-    formalmente que passou do prazo. Alimenta a "Taxa de ocorrência" do
-    relatório, que já lê o campo `ocorrencia` do pedido.
+    Registra uma ocorrÃªncia (atraso, avaria, perda, item incompletoâ€¦) num
+    pedido a qualquer momento â€” diferente do registro de ocorrÃªncia feito
+    junto da devoluÃ§Ã£o (ModalDevolver), este pode ser usado enquanto o
+    material ainda estÃ¡ em posse do solicitante, ex.: pra sinalizar
+    formalmente que passou do prazo. Alimenta a "Taxa de ocorrÃªncia" do
+    relatÃ³rio, que jÃ¡ lÃª o campo `ocorrencia` do pedido.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -257,10 +257,13 @@ class AbrirOcorrenciaView(APIView):
         try:
             pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
         except Pedido.DoesNotExist:
-            return Response({'detail': 'Não encontrado.'}, status=404)
+            return Response({'detail': 'NÃ£o encontrado.'}, status=404)
+
+        if pedido.concedente_id != request.user.id and not request.user.is_staff:
+            return Response({'detail': 'SÃ³ quem emprestou o material (concedente) pode abrir ocorrÃªncia.'}, status=403)
 
         if pedido.status in ('recusado', 'cancelado'):
-            return Response({'detail': 'Não é possível registrar ocorrência num pedido recusado/cancelado.'}, status=400)
+            return Response({'detail': 'NÃ£o Ã© possÃ­vel registrar ocorrÃªncia num pedido recusado/cancelado.'}, status=400)
 
         tipo = (request.data.get('tipo') or '').strip()
         if tipo not in TIPOS_OCORRENCIA_VALIDOS:
@@ -276,10 +279,10 @@ class AbrirOcorrenciaView(APIView):
 class CobrarDevolucaoView(APIView):
     """POST /api/pedidos/<id>/cobrar/
 
-    Envia uma cobrança de devolução ao solicitante — só permitido quando o
-    pedido está de fato em atraso (ainda em posse de alguém e com o prazo
-    de devolução já vencido), pra não virar um botão de "lembrete" genérico
-    e sim algo com peso de cobrança real.
+    Envia uma cobranÃ§a de devoluÃ§Ã£o ao solicitante â€” sÃ³ permitido quando o
+    pedido estÃ¡ de fato em atraso (ainda em posse de alguÃ©m e com o prazo
+    de devoluÃ§Ã£o jÃ¡ vencido), pra nÃ£o virar um botÃ£o de "lembrete" genÃ©rico
+    e sim algo com peso de cobranÃ§a real.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -287,19 +290,22 @@ class CobrarDevolucaoView(APIView):
         try:
             pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
         except Pedido.DoesNotExist:
-            return Response({'detail': 'Não encontrado.'}, status=404)
+            return Response({'detail': 'NÃ£o encontrado.'}, status=404)
+
+        if pedido.concedente_id != request.user.id and not request.user.is_staff:
+            return Response({'detail': 'SÃ³ quem emprestou o material (concedente) pode cobrar a devoluÃ§Ã£o.'}, status=403)
 
         if pedido.status not in ('aprovado', 'aguardando_devolucao'):
-            return Response({'detail': 'Só é possível cobrar devolução de pedidos que ainda estão em posse do solicitante.'}, status=400)
+            return Response({'detail': 'SÃ³ Ã© possÃ­vel cobrar devoluÃ§Ã£o de pedidos que ainda estÃ£o em posse do solicitante.'}, status=400)
         if not pedido.dev_iso or pedido.dev_iso >= timezone.now().date():
-            return Response({'detail': 'Este pedido ainda não está em atraso.'}, status=400)
+            return Response({'detail': 'Este pedido ainda nÃ£o estÃ¡ em atraso.'}, status=400)
 
         tom = (request.data.get('tom') or 'gentil').strip().lower()
         if tom not in TONS_COBRANCA_VALIDOS:
             tom = 'gentil'
         mensagem = (request.data.get('mensagem') or '').strip()
         if not mensagem:
-            return Response({'detail': 'Informe a mensagem da cobrança.'}, status=400)
+            return Response({'detail': 'Informe a mensagem da cobranÃ§a.'}, status=400)
 
         notificar_cobranca_devolucao(pedido, tom=tom, mensagem=mensagem)
         return Response(PedidoSerializer(pedido).data)
@@ -308,9 +314,9 @@ class CobrarDevolucaoView(APIView):
 class RelatorioXlsxView(APIView):
     """
     GET /api/pedidos/relatorio/?periodo=30&status=devolvido
-    Gera e devolve a planilha .xlsx do relatório de empréstimos, no mesmo
+    Gera e devolve a planilha .xlsx do relatÃ³rio de emprÃ©stimos, no mesmo
     formato usado pela equipe (abas Resumo + Pedidos), com os dados reais
-    do banco. Aceita os mesmos filtros de período/status da listagem.
+    do banco. Aceita os mesmos filtros de perÃ­odo/status da listagem.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -329,12 +335,12 @@ class RelatorioXlsxView(APIView):
 
         data_inicio = request.query_params.get('data_inicio')
         data_fim    = request.query_params.get('data_fim')
-        periodo_label = 'início até hoje'
+        periodo_label = 'inÃ­cio atÃ© hoje'
         if data_inicio and data_fim:
             di, df = parse_date(data_inicio), parse_date(data_fim)
             if di and df:
                 qs = qs.filter(criado_em__date__gte=di, criado_em__date__lte=df)
-                periodo_label = f'{di.strftime("%d/%m/%Y")} até {df.strftime("%d/%m/%Y")}'
+                periodo_label = f'{di.strftime("%d/%m/%Y")} atÃ© {df.strftime("%d/%m/%Y")}'
         else:
             periodo = request.query_params.get('periodo')
             if periodo:
@@ -342,7 +348,7 @@ class RelatorioXlsxView(APIView):
                     dias = int(periodo)
                     desde = timezone.now() - timezone.timedelta(days=dias)
                     qs = qs.filter(criado_em__gte=desde)
-                    periodo_label = f'últimos {dias} dias'
+                    periodo_label = f'Ãºltimos {dias} dias'
                 except (TypeError, ValueError):
                     pass
 
