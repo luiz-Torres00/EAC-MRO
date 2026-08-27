@@ -18,11 +18,25 @@ LOCALIZACAO_TIPO_CHOICES = [
 
 
 def gerar_codigo():
-    """Gera código EAC-ANO-NNN único."""
+    """Gera código EAC-ANO-NNN único.
+
+    Usa o MAIOR número já usado no ano, não a quantidade de pedidos — contar
+    linhas (`count()`) quebra se a sequência tiver algum buraco (um pedido
+    apagado, ou um código migrado do Firebase fora de ordem): por exemplo,
+    se só existem os códigos 001, 002, 003, 004 e 006 (faltando o 005), a
+    contagem dá 5 e "count+1" vira 006 — que já existe, e o Postgres recusa
+    (erro 500). Pegando o maior número já usado e somando 1, sempre anda pra
+    frente e nunca tenta repetir um código existente.
+    """
     from django.utils import timezone
-    ano  = timezone.now().year
-    last = Pedido.objects.filter(codigo__startswith=f'EAC-{ano}-').count()
-    return f'EAC-{ano}-{last + 1:03d}'
+    ano     = timezone.now().year
+    prefixo = f'EAC-{ano}-'
+    maior   = 0
+    for codigo in Pedido.objects.filter(codigo__startswith=prefixo).values_list('codigo', flat=True):
+        sufixo = codigo[len(prefixo):]
+        if sufixo.isdigit():
+            maior = max(maior, int(sufixo))
+    return f'{prefixo}{maior + 1:03d}'
 
 
 class Estudio(models.Model):
