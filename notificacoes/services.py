@@ -45,7 +45,7 @@ def _corpo_email(pedido, mensagem):
         f'MG concedente: {pedido.mg_concedente or "—"}',
         f'Início: {_fmt_data(pedido.inicio_iso)}',
         f'Devolução prevista: {_fmt_data(pedido.dev_iso)}',
-        f'Código EAC: {pedido.codigo or "—"}',
+        f'Código Empréstimos: {pedido.codigo or "—"}',
     ]
     if pedido.numero_pedido:
         linhas.append(f'Número do pedido: {pedido.numero_pedido}')
