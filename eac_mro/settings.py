@@ -165,4 +165,27 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'EAC MRO <nao-responda
 # diferente da chave SMTP usada antes.
 BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
 
+# ── Logging ──────────────────────────────────────────────────────────────────
+# Sem isso, com DEBUG=False (produção), o Django engole o traceback de
+# qualquer erro 500 — o log do Render só mostra a linha de acesso ("POST
+# /api/pedidos/ ... 500 145"), sem nenhuma pista do que quebrou. Esse bloco
+# manda todo log (incluindo os erros internos do Django e os nossos próprios
+# logger.error/logger.exception em notificacoes/services.py) pro console, que
+# é o que o Render captura e mostra na aba Logs. Não expõe nada a mais pro
+# usuário final — DEBUG continua False, a resposta HTTP continua genérica; só
+# passamos a enxergar o motivo real no log do servidor.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+}
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
