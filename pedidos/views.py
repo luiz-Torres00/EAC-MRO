@@ -1,3 +1,5 @@
+from datetime import datetime, time as dtime
+
 from rest_framework import generics, status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -34,6 +36,31 @@ def _visivel_para(user, qs):
     if setor:
         filtro |= Q(mg_solicitante=setor) | Q(mg_concedente=setor)
     return qs.filter(filtro)
+
+
+def _filtro_intervalo_datas(qs, data_inicio_str, data_fim_str):
+    """Filtra `qs` pelo intervalo de datas do calendário (Dashboard/
+    Relatórios), comparando `criado_em` contra o início do dia de
+    `data_inicio` até o fim do dia de `data_fim`, ambos no fuso horário do
+    projeto (America/Sao_Paulo).
+
+    Antes isso usava `criado_em__date__gte`/`__lte`, que depende do Django
+    converter o datetime pro fuso corrente "por baixo dos panos" antes de
+    extrair a data — e um pedido registrado hoje mesmo podia ficar de fora
+    do filtro "hoje" dependendo de como esse lookup se comporta no banco em
+    produção. Aqui a conversão é feita explicitamente: monta o instante exato
+    de 00:00:00 do dia de início e 23:59:59,999999 do dia de fim, os dois já
+    como datetime "aware" no fuso do projeto, e compara `criado_em`
+    diretamente contra esse intervalo — sem depender de nenhuma conversão
+    implícita.
+    """
+    di, df = parse_date(data_inicio_str), parse_date(data_fim_str)
+    if not di or not df:
+        return qs
+    fuso = timezone.get_current_timezone()
+    inicio_dt = timezone.make_aware(datetime.combine(di, dtime.min), fuso)
+    fim_dt    = timezone.make_aware(datetime.combine(df, dtime.max), fuso)
+    return qs.filter(criado_em__gte=inicio_dt, criado_em__lte=fim_dt)
 
 
 class PedidoListCreateView(generics.ListCreateAPIView):
@@ -79,9 +106,7 @@ class PedidoListCreateView(generics.ListCreateAPIView):
         data_inicio = self.request.query_params.get('data_inicio')
         data_fim    = self.request.query_params.get('data_fim')
         if data_inicio and data_fim:
-            di, df = parse_date(data_inicio), parse_date(data_fim)
-            if di and df:
-                qs = qs.filter(criado_em__date__gte=di, criado_em__date__lte=df)
+            qs = _filtro_intervalo_datas(qs, data_inicio, data_fim)
         else:
             # Filtro por período (dias), só se não veio um intervalo explícito.
             periodo = self.request.query_params.get('periodo')
@@ -383,7 +408,7 @@ class RelatorioXlsxView(APIView):
         if data_inicio and data_fim:
             di, df = parse_date(data_inicio), parse_date(data_fim)
             if di and df:
-                qs = qs.filter(criado_em__date__gte=di, criado_em__date__lte=df)
+                qs = _filtro_intervalo_datas(qs, data_inicio, data_fim)
                 periodo_label = f'{di.strftime("%d/%m/%Y")} até {df.strftime("%d/%m/%Y")}'
         else:
             periodo = request.query_params.get('periodo')
