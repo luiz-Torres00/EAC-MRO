@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, transaction, IntegrityError
 from django.conf import settings
 
 
@@ -130,6 +130,26 @@ class Pedido(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.codigo:
+            # `gerar_codigo()` conta quantos pedidos já existem no ano e usa
+            # count+1 — se duas requisições chegarem quase juntas (ex.: duplo
+            # clique em "Salvar", ou um clique novo enquanto a página ainda
+            # está reenviando a anterior), as duas podem contar o mesmo total
+            # e tentar salvar o MESMO código, e o banco recusa a segunda por
+            # já existir (erro 500 "duplicate key ... codigo"). Em vez de
+            # deixar isso quebrar o pedido do usuário, tenta de novo com um
+            # código novo (o savepoint do transaction.atomic garante que a
+            # tentativa que falhou não deixa a transação num estado quebrado
+            # para a próxima tentativa nem para o resto da requisição).
+            for _tentativa in range(5):
+                self.codigo = gerar_codigo()
+                try:
+                    with transaction.atomic():
+                        super().save(*args, **kwargs)
+                    return
+                except IntegrityError:
+                    continue
+            # Depois de 5 tentativas ainda colidindo (bem improvável), deixa
+            # a última subir de verdade em vez de tentar pra sempre.
             self.codigo = gerar_codigo()
         super().save(*args, **kwargs)
 
