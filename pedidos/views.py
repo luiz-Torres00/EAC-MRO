@@ -10,7 +10,7 @@ from .serializers import PedidoSerializer, PedidoCreateSerializer
 from .relatorio import gerar_relatorio_xlsx
 from notificacoes.services import (
     notificar_novo_pedido, notificar_aprovado, notificar_recusado,
-    notificar_devolvido, notificar_prazo_estendido,
+    notificar_devolvido, notificar_devolucao_registrada, notificar_prazo_estendido,
     notificar_ocorrencia_aberta, notificar_cobranca_devolucao,
 )
 
@@ -180,7 +180,14 @@ class RecusarPedidoView(APIView):
 
 
 class DevolverPedidoView(APIView):
-    """PATCH /api/pedidos/<id>/devolver/"""
+    """PATCH /api/pedidos/<id>/devolver/
+
+    Passo 1 da devolução: o SOLICITANTE (quem estava com o material) registra
+    que está devolvendo. Isso não fecha o pedido — só move o status para
+    'aguardando_devolucao', esperando o concedente conferir o material e
+    confirmar (ver ConfirmarDevolucaoView). A palavra final de que o material
+    realmente voltou é de quem emprestou.
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def patch(self, request, pk):
@@ -188,10 +195,47 @@ class DevolverPedidoView(APIView):
             pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
         except Pedido.DoesNotExist:
             return Response({'detail': 'Não encontrado.'}, status=404)
-        pedido.status      = 'devolvido'
-        pedido.devolvido_em = timezone.now()
+
+        if pedido.solicitante_id != request.user.id and not request.user.is_staff:
+            return Response({'detail': 'Só quem solicitou o material pode registrar a devolução.'}, status=403)
+
+        if pedido.status != 'aprovado':
+            return Response({'detail': 'Só é possível registrar devolução de pedidos aprovados.'}, status=400)
+
+        pedido.status = 'aguardando_devolucao'
         if request.data.get('observacao'):
             pedido.observacao = request.data['observacao']
+        if request.data.get('ocorrencia'):
+            pedido.ocorrencia = request.data['ocorrencia']
+        pedido.save()
+        notificar_devolucao_registrada(pedido)
+        return Response(PedidoSerializer(pedido).data)
+
+
+class ConfirmarDevolucaoView(APIView):
+    """PATCH /api/pedidos/<id>/confirmar-devolucao/
+
+    Passo 2 (final) da devolução: o CONCEDENTE confere o material que voltou
+    e confirma — só aí o pedido vira 'devolvido' de verdade.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
+        except Pedido.DoesNotExist:
+            return Response({'detail': 'Não encontrado.'}, status=404)
+
+        if pedido.concedente_id != request.user.id and not request.user.is_staff:
+            return Response({'detail': 'Só quem emprestou o material (concedente) pode confirmar a devolução.'}, status=403)
+
+        if pedido.status != 'aguardando_devolucao':
+            return Response({'detail': 'Este pedido não está aguardando confirmação de devolução.'}, status=400)
+
+        pedido.status       = 'devolvido'
+        pedido.devolvido_em = timezone.now()
+        if request.data.get('observacao'):
+            pedido.observacao = (pedido.observacao + '\n' if pedido.observacao else '') + request.data['observacao']
         if request.data.get('ocorrencia'):
             pedido.ocorrencia = request.data['ocorrencia']
         pedido.save()
@@ -295,7 +339,7 @@ class CobrarDevolucaoView(APIView):
         if pedido.concedente_id != request.user.id and not request.user.is_staff:
             return Response({'detail': 'Só quem emprestou o material (concedente) pode cobrar a devolução.'}, status=403)
 
-        if pedido.status not in ('aprovado', 'aguardando_devolucao'):
+        if pedido.status != 'aprovado':
             return Response({'detail': 'Só é possível cobrar devolução de pedidos que ainda estão em posse do solicitante.'}, status=400)
         if not pedido.dev_iso or pedido.dev_iso >= timezone.now().date():
             return Response({'detail': 'Este pedido ainda não está em atraso.'}, status=400)

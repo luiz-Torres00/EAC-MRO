@@ -148,6 +148,34 @@ def notificar_recusado(pedido):
     )
 
 
+def notificar_devolucao_registrada(pedido):
+    """Passo 1 da devolução: o solicitante registrou que está devolvendo,
+    mas ainda falta o concedente conferir o material e confirmar. Avisa o
+    concedente e os gestores do MG concedente — são eles que vão bater o
+    olho no material e apertar "Confirmar devolução"."""
+    ja_notificados = set()
+    if pedido.concedente_id:
+        _criar(
+            pedido.concedente, 'pedido_devolvido',
+            f'Devolução registrada, confirme — {pedido.produto}',
+            f'{pedido.solicitante_nome or "O solicitante"} registrou a devolução de "{pedido.produto}". '
+            f'Confira o material e confirme a devolução para fechar o pedido.',
+            pedido.id, pedido=pedido,
+        )
+        ja_notificados.add(pedido.concedente_id)
+    for gestor in _gestores_do_mg(pedido.mg_concedente):
+        if gestor.id in ja_notificados:
+            continue
+        _criar(
+            gestor, 'pedido_devolvido',
+            f'Devolução registrada no seu armazém — {pedido.mg_concedente}',
+            f'"{pedido.produto}" foi marcado como devolvido por {pedido.solicitante_nome or "o solicitante"}, '
+            f'aguardando confirmação do concedente.',
+            pedido.id, pedido=pedido,
+        )
+        ja_notificados.add(gestor.id)
+
+
 def notificar_devolvido(pedido):
     """Ao devolver, avisa quem pediu (confirmação) e os gestores do MG
     concedente (o material voltou pro armazém deles)."""
