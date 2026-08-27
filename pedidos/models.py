@@ -2,12 +2,48 @@ from django.db import models
 from django.conf import settings
 
 
+# Fora da classe pra poder ser usado tanto por Pedido quanto por Estudio
+# (Estudio precisa saber a que MG pertence, com as mesmas opções).
+MG_CHOICES = [
+    ('', '—'), ('MG1','MG1'), ('MG2','MG2'), ('MG3','MG3'), ('MG4','MG4'),
+    ('Cenografia','Cenografia'), ('Arte','Arte'),
+]
+
+LOCALIZACAO_TIPO_CHOICES = [
+    ('armazenagem', 'Armazenagem'),
+    ('externa',     'Externa'),
+    ('cc',          'CC'),
+    ('estudio',     'Estúdio'),
+]
+
+
 def gerar_codigo():
     """Gera código EAC-ANO-NNN único."""
     from django.utils import timezone
     ano  = timezone.now().year
     last = Pedido.objects.filter(codigo__startswith=f'EAC-{ano}-').count()
     return f'EAC-{ano}-{last + 1:03d}'
+
+
+class Estudio(models.Model):
+    """Estúdio de um MG, cadastrado pelo admin (botão "Vincular estúdios aos
+    MGs" na tela Usuários). Usado como sub-opção quando a localização do
+    material de um pedido é "Estúdio": ao escolher essa opção, só aparecem
+    os estúdios cujo `mg` bate com o MG concedente do pedido — cada MG
+    enxerga só os estúdios dele.
+    """
+    nome      = models.CharField(max_length=100)
+    mg        = models.CharField(max_length=20, choices=MG_CHOICES)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name        = 'Estúdio'
+        verbose_name_plural = 'Estúdios'
+        ordering            = ['mg', 'nome']
+        unique_together     = [('nome', 'mg')]
+
+    def __str__(self):
+        return f'{self.nome} ({self.mg})'
 
 
 class Pedido(models.Model):
@@ -24,10 +60,8 @@ class Pedido(models.Model):
         ('Cessão',      'Cessão'),
         ('Reserva',     'Reserva'),
     ]
-    MG_CHOICES = [
-        ('', '—'), ('MG1','MG1'), ('MG2','MG2'), ('MG3','MG3'), ('MG4','MG4'),
-        ('Cenografia','Cenografia'), ('Arte','Arte'),
-    ]
+    # Mantido acessível como Pedido.MG_CHOICES (era definido aqui antes).
+    MG_CHOICES = MG_CHOICES
 
     # Identificação
     codigo          = models.CharField(max_length=30, unique=True, blank=True)
@@ -40,7 +74,16 @@ class Pedido(models.Model):
     produto_concedente= models.CharField(max_length=255, blank=True)
     mg_solicitante    = models.CharField(max_length=20, choices=MG_CHOICES, blank=True)
     mg_concedente     = models.CharField(max_length=20, choices=MG_CHOICES, blank=True)
-    localizacao       = models.CharField(max_length=255, blank=True)
+    localizacao       = models.CharField(max_length=255, blank=True)  # legado (import Firestore)
+
+    # Localização estruturada do material (Armazenagem/Externa/CC/Estúdio).
+    # Separado do campo `localizacao` acima (texto livre, só usado pelos
+    # registros antigos importados do Firestore) pra não misturar os dois.
+    localizacao_tipo  = models.CharField(max_length=20, choices=LOCALIZACAO_TIPO_CHOICES, blank=True)
+    estudio           = models.ForeignKey(
+        'Estudio', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='pedidos'
+    )
 
     # Partes (FK + campos de texto para compatibilidade)
     solicitante       = models.ForeignKey(

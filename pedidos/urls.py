@@ -3,13 +3,16 @@ from .views import (
     PedidoListCreateView, PedidoDetailView,
     AprovarPedidoView, RecusarPedidoView,
     DevolverPedidoView, ConfirmarDevolucaoView, EstenderPedidoView,
-    AbrirOcorrenciaView, CobrarDevolucaoView,
+    AbrirOcorrenciaView, CobrarDevolucaoView, LocalizacaoPedidoView,
+    EstudioListCreateView, EstudioDetailView,
     RelatorioXlsxView,
 )
 
 urlpatterns = [
     path('',                        PedidoListCreateView.as_view(),    name='pedidos'),
     path('relatorio/',              RelatorioXlsxView.as_view(),       name='pedido-relatorio'),
+    path('estudios/',               EstudioListCreateView.as_view(),   name='estudios'),
+    path('estudios/<int:pk>/',      EstudioDetailView.as_view(),       name='estudio-detalhe'),
     path('<int:pk>/',               PedidoDetailView.as_view(),        name='pedido-detalhe'),
     path('<int:pk>/aprovar/',       AprovarPedidoView.as_view(),       name='pedido-aprovar'),
     path('<int:pk>/recusar/',       RecusarPedidoView.as_view(),       name='pedido-recusar'),
@@ -18,4 +21,5 @@ urlpatterns = [
     path('<int:pk>/estender/',      EstenderPedidoView.as_view(),      name='pedido-estender'),
     path('<int:pk>/ocorrencia/',    AbrirOcorrenciaView.as_view(),     name='pedido-ocorrencia'),
     path('<int:pk>/cobrar/',        CobrarDevolucaoView.as_view(),     name='pedido-cobrar'),
+    path('<int:pk>/localizacao/',   LocalizacaoPedidoView.as_view(),   name='pedido-localizacao'),
 ]

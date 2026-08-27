@@ -7,8 +7,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.http import HttpResponse
 
-from .models import Pedido
-from .serializers import PedidoSerializer, PedidoCreateSerializer
+from .models import Pedido, Estudio, LOCALIZACAO_TIPO_CHOICES
+from .serializers import PedidoSerializer, PedidoCreateSerializer, EstudioSerializer
 from .relatorio import gerar_relatorio_xlsx
 from notificacoes.services import (
     notificar_novo_pedido, notificar_aprovado, notificar_recusado,
@@ -378,6 +378,101 @@ class CobrarDevolucaoView(APIView):
 
         notificar_cobranca_devolucao(pedido, tom=tom, mensagem=mensagem)
         return Response(PedidoSerializer(pedido).data)
+
+
+class LocalizacaoPedidoView(APIView):
+    """PATCH /api/pedidos/<id>/localizacao/
+
+    Define onde o material do pedido está guardado: Armazenagem, Externa, CC
+    ou Estúdio. Quando é "Estúdio", precisa vir "estudio_id" apontando pra um
+    Estudio cadastrado — e esse estúdio só é aceito se for do mesmo MG
+    concedente do pedido (a ideia é sempre localizar o material dentro do MG
+    de quem emprestou). Solicitante, concedente ou admin podem alterar —
+    localização não é uma decisão de uma parte só, é operacional.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, pk):
+        try:
+            pedido = _visivel_para(request.user, Pedido.objects.all()).get(pk=pk)
+        except Pedido.DoesNotExist:
+            return Response({'detail': 'Não encontrado.'}, status=404)
+
+        eh_parte = request.user.id in (pedido.solicitante_id, pedido.concedente_id)
+        if not eh_parte and not request.user.is_staff:
+            return Response(
+                {'detail': 'Só o solicitante, o concedente ou um administrador podem alterar a localização.'},
+                status=403,
+            )
+
+        tipos_validos = dict(LOCALIZACAO_TIPO_CHOICES)
+        tipo = (request.data.get('localizacao_tipo') or '').strip()
+        if tipo not in tipos_validos:
+            return Response(
+                {'detail': f'"localizacao_tipo" deve ser um de: {", ".join(tipos_validos)}.'},
+                status=400,
+            )
+
+        if tipo == 'estudio':
+            estudio_id = request.data.get('estudio_id') or request.data.get('estudio')
+            if not estudio_id:
+                return Response({'detail': 'Informe "estudio_id".'}, status=400)
+            try:
+                estudio = Estudio.objects.get(pk=estudio_id)
+            except (Estudio.DoesNotExist, ValueError, TypeError):
+                return Response({'detail': 'Estúdio não encontrado.'}, status=404)
+            mg_pedido = pedido.mg_concedente or pedido.mg_solicitante
+            if mg_pedido and estudio.mg != mg_pedido:
+                return Response(
+                    {'detail': f'Esse estúdio é do {estudio.mg}, mas o pedido é do {mg_pedido}.'},
+                    status=400,
+                )
+            pedido.estudio = estudio
+        else:
+            pedido.estudio = None
+
+        pedido.localizacao_tipo = tipo
+        pedido.save()
+        return Response(PedidoSerializer(pedido, context={'request': request}).data)
+
+
+class EstudioListCreateView(generics.ListCreateAPIView):
+    """
+    GET  /api/pedidos/estudios/?mg=MG1 — lista estúdios cadastrados (todo
+         usuário autenticado — é o que alimenta a sub-opção "Estúdio" no
+         controle de localização de qualquer pedido).
+    POST /api/pedidos/estudios/        — cadastra um estúdio novo (só admin:
+         botão "Vincular estúdios aos MGs" na tela Usuários).
+    """
+    serializer_class   = EstudioSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = Estudio.objects.all()
+        mg = self.request.query_params.get('mg')
+        if mg:
+            qs = qs.filter(mg=mg)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_staff:
+            return Response({'detail': 'Só administradores podem cadastrar estúdios.'}, status=403)
+        return super().create(request, *args, **kwargs)
+
+
+class EstudioDetailView(generics.DestroyAPIView):
+    """DELETE /api/pedidos/estudios/<id>/ — remove um estúdio (só admin).
+
+    Pedidos que já apontavam pra esse estúdio não quebram: o campo
+    `estudio` deles vira nulo (on_delete=SET_NULL), mantendo o histórico.
+    """
+    queryset            = Estudio.objects.all()
+    permission_classes  = [permissions.IsAuthenticated]
+
+    def delete(self, request, *args, **kwargs):
+        if not request.user.is_staff:
+            return Response({'detail': 'Só administradores podem remover estúdios.'}, status=403)
+        return super().delete(request, *args, **kwargs)
 
 
 class RelatorioXlsxView(APIView):
