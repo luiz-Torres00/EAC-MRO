@@ -386,9 +386,10 @@ class LocalizacaoPedidoView(APIView):
     Define onde o material do pedido está guardado: Armazenagem, Externa, CC
     ou Estúdio. Quando é "Estúdio", precisa vir "estudio_id" apontando pra um
     Estudio cadastrado — e esse estúdio só é aceito se for do mesmo MG
-    concedente do pedido (a ideia é sempre localizar o material dentro do MG
-    de quem emprestou). Solicitante, concedente ou admin podem alterar —
-    localização não é uma decisão de uma parte só, é operacional.
+    solicitante do pedido (o material fica em posse de quem pediu, é o MG
+    dele que importa pra localização). Solicitante, concedente ou admin
+    podem alterar — localização não é uma decisão de uma parte só, é
+    operacional.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -421,7 +422,11 @@ class LocalizacaoPedidoView(APIView):
                 estudio = Estudio.objects.get(pk=estudio_id)
             except (Estudio.DoesNotExist, ValueError, TypeError):
                 return Response({'detail': 'Estúdio não encontrado.'}, status=404)
-            mg_pedido = pedido.mg_concedente or pedido.mg_solicitante
+            # O material fica em posse do SOLICITANTE, não de quem emprestou —
+            # é o MG dele que precisa bater com o estúdio escolhido. Mantém o
+            # MG concedente como fallback só pra registros antigos que ficaram
+            # sem mg_solicitante preenchido.
+            mg_pedido = pedido.mg_solicitante or pedido.mg_concedente
             if mg_pedido and estudio.mg != mg_pedido:
                 return Response(
                     {'detail': f'Esse estúdio é do {estudio.mg}, mas o pedido é do {mg_pedido}.'},
