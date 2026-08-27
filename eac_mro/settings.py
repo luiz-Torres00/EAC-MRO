@@ -144,6 +144,15 @@ if os.environ.get('EMAIL_HOST'):
     EMAIL_HOST_USER     = os.environ.get('EMAIL_HOST_USER', '')
     EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
     EMAIL_USE_TLS       = os.environ.get('EMAIL_USE_TLS', 'True') == 'True'
+    # Sem timeout, o smtplib do Python espera a resposta do servidor SMTP
+    # indefinidamente. Como o backend roda com um único worker (gunicorn
+    # WEB_CONCURRENCY=1), um SMTP lento ou fora do ar travaria o processo
+    # inteiro — ninguém mais conseguiria usar o sistema até isso destravar
+    # sozinho. 10s é tempo de sobra pra um handshake SMTP normal; se passar
+    # disso, desiste e segue o request (o envio de e-mail já é tratado como
+    # best-effort nas funções de notificação — nunca deve travar o fluxo
+    # principal do pedido).
+    EMAIL_TIMEOUT       = int(os.environ.get('EMAIL_TIMEOUT', '10'))
 else:
     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
