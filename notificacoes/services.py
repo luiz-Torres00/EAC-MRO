@@ -31,6 +31,171 @@ def _fmt_data(valor):
     return str(valor)
 
 
+def _fmt_data_hora(valor):
+    """Formata um datetime (ex.: `criado_em`) pro e-mail, com dia e hora."""
+    if not valor:
+        return '—'
+    if hasattr(valor, 'strftime'):
+        return valor.strftime('%d/%m/%Y às %H:%M')
+    return str(valor)
+
+
+def _corpo_liberacao(pedido, papel):
+    """Corpo completo do e-mail de liberação do empréstimo — enviado tanto
+    pro solicitante quanto pro concedente assim que o pedido é aprovado.
+
+    Detalha TODOS os dados do pedido (datas, as duas partes, produto,
+    itens, código…) de propósito — é o e-mail que serve de "combinado por
+    escrito" do empréstimo, então não pode deixar brecha pra dúvida ou
+    erro sobre o que foi liberado e quando o material precisa voltar.
+
+    `papel` é 'solicitante' ou 'concedente', só pra personalizar a
+    abertura pra quem está lendo o e-mail.
+    """
+    if papel == 'solicitante':
+        abertura = (
+            f'Olá, {pedido.solicitante_nome or "tudo bem"}!\n\n'
+            f'Seu empréstimo foi APROVADO e está liberado. O material pode ser retirado '
+            f'com {pedido.concedente_nome or "o concedente"}. Confira abaixo todos os dados '
+            f'do pedido — em especial a data de devolução.'
+        )
+    else:
+        abertura = (
+            f'Olá, {pedido.concedente_nome or "tudo bem"}!\n\n'
+            f'O empréstimo abaixo foi APROVADO e está liberado. O material será retirado por '
+            f'{pedido.solicitante_nome or "o solicitante"}. Confira abaixo todos os dados do pedido.'
+        )
+
+    status_label = dict(pedido.STATUS_CHOICES).get(pedido.status, pedido.status)
+
+    linhas = [
+        abertura, '',
+        '=' * 44,
+        'DADOS DO EMPRÉSTIMO',
+        '=' * 44,
+        f'Código:              {pedido.codigo or "—"}',
+    ]
+    if pedido.numero_pedido:
+        linhas.append(f'Número do pedido:    {pedido.numero_pedido}')
+    linhas += [
+        f'Tipo:                {pedido.tipo or "—"}',
+        f'Status:              {status_label}',
+        '',
+        f'Produto:             {pedido.produto or "—"}',
+    ]
+    if pedido.produto_concedente:
+        linhas.append(f'Produto (concedente):{pedido.produto_concedente}')
+    if pedido.materiais:
+        linhas.append(f'Itens:               {", ".join(pedido.materiais)}')
+    linhas += [
+        '',
+        f'Solicitante:         {pedido.solicitante_nome or "—"} ({pedido.solicitante_email or "—"})',
+        f'MG solicitante:      {pedido.mg_solicitante or "—"}',
+        f'Concedente:          {pedido.concedente_nome or "—"} ({pedido.concedente_email or "—"})',
+        f'MG concedente:       {pedido.mg_concedente or "—"}',
+        '',
+        f'Pedido criado em:    {_fmt_data_hora(pedido.criado_em)}',
+        f'Início:              {_fmt_data(pedido.inicio_iso)}',
+        f'Devolução prevista:  {_fmt_data(pedido.dev_iso)}',
+    ]
+    if pedido.observacao:
+        linhas += ['', f'Observação: {pedido.observacao}']
+    linhas += [
+        '', '=' * 44,
+        'Se alguma dessas informações estiver errada, fale com quem aprovou o pedido '
+        'antes de retirar ou entregar o material.',
+    ]
+    return '\n'.join(linhas)
+
+
+def _corpo_extensao(pedido, papel, motivo='', prazo_anterior=None):
+    """Corpo completo do e-mail de extensão de prazo — enviado tanto pro
+    solicitante quanto pro concedente quando a data de devolução de um
+    pedido já aprovado é adiada. Deixa explícito o prazo anterior e o novo
+    prazo, junto com todos os dados do pedido, pra não sobrar dúvida sobre
+    até quando o material pode ficar fora."""
+    if papel == 'solicitante':
+        abertura = (
+            f'Olá, {pedido.solicitante_nome or "tudo bem"}!\n\n'
+            f'O prazo de devolução do seu empréstimo foi ESTENDIDO. Confira abaixo '
+            f'a nova data de devolução e todos os dados do pedido.'
+        )
+    else:
+        abertura = (
+            f'Olá, {pedido.concedente_nome or "tudo bem"}!\n\n'
+            f'O prazo de devolução do empréstimo abaixo, com {pedido.solicitante_nome or "o solicitante"}, '
+            f'foi ESTENDIDO. Confira abaixo a nova data de devolução e todos os dados do pedido.'
+        )
+
+    status_label = dict(pedido.STATUS_CHOICES).get(pedido.status, pedido.status)
+
+    linhas = [
+        abertura, '',
+        '=' * 44,
+        'PRAZO DE DEVOLUÇÃO ALTERADO',
+        '=' * 44,
+        f'Prazo anterior:      {_fmt_data(prazo_anterior)}',
+        f'Novo prazo:          {_fmt_data(pedido.dev_iso)}',
+    ]
+    if motivo:
+        linhas.append(f'Motivo:              {motivo}')
+    linhas += [
+        '',
+        '=' * 44,
+        'DADOS DO EMPRÉSTIMO',
+        '=' * 44,
+        f'Código:              {pedido.codigo or "—"}',
+    ]
+    if pedido.numero_pedido:
+        linhas.append(f'Número do pedido:    {pedido.numero_pedido}')
+    linhas += [
+        f'Tipo:                {pedido.tipo or "—"}',
+        f'Status:              {status_label}',
+        '',
+        f'Produto:             {pedido.produto or "—"}',
+    ]
+    if pedido.produto_concedente:
+        linhas.append(f'Produto (concedente):{pedido.produto_concedente}')
+    if pedido.materiais:
+        linhas.append(f'Itens:               {", ".join(pedido.materiais)}')
+    linhas += [
+        '',
+        f'Solicitante:         {pedido.solicitante_nome or "—"} ({pedido.solicitante_email or "—"})',
+        f'MG solicitante:      {pedido.mg_solicitante or "—"}',
+        f'Concedente:          {pedido.concedente_nome or "—"} ({pedido.concedente_email or "—"})',
+        f'MG concedente:       {pedido.mg_concedente or "—"}',
+        '',
+        f'Pedido criado em:    {_fmt_data_hora(pedido.criado_em)}',
+        f'Início:              {_fmt_data(pedido.inicio_iso)}',
+    ]
+    if pedido.observacao:
+        linhas += ['', f'Observação: {pedido.observacao}']
+    linhas += [
+        '', '=' * 44,
+        'Se alguma dessas informações estiver errada, fale com quem estendeu o prazo '
+        'antes de considerar a nova data válida.',
+    ]
+    return '\n'.join(linhas)
+
+
+def _enviar_email_bruto(destinatario, titulo, corpo):
+    """Como `_enviar_email`, mas envia `corpo` exatamente como veio — sem
+    passar pelo `_corpo_email` genérico. Usado quando o corpo já foi
+    montado sob medida pro evento (ex.: liberação do empréstimo)."""
+    if not destinatario or not destinatario.email:
+        return
+    try:
+        send_mail(
+            subject=titulo,
+            message=corpo,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[destinatario.email],
+            fail_silently=True,
+        )
+    except Exception:
+        logger.exception('Falha ao enviar e-mail de liberação para %s', destinatario.email)
+
+
 def _corpo_email(pedido, mensagem):
     """Monta um corpo de e-mail simples com os dados do formulário do pedido."""
     if not pedido:
@@ -127,14 +292,37 @@ def notificar_novo_pedido(pedido):
 
 
 def notificar_aprovado(pedido):
-    _criar(
-        pedido.solicitante, 'pedido_aprovado',
-        f'Pedido aprovado — {pedido.produto}',
-        f'Seu pedido de "{pedido.produto}" foi aprovado.' + (
-            f' Devolução prevista para {_fmt_data(pedido.dev_iso)}.' if pedido.dev_iso else ''
-        ),
-        pedido.id, pedido=pedido,
-    )
+    """Ao aprovar/liberar um pedido, avisa as DUAS pessoas marcadas nele —
+    solicitante e concedente — cada uma com um e-mail completo (todos os
+    dados do empréstimo) pro e-mail de login dela. Não é só um aviso
+    genérico: o corpo do e-mail (`_corpo_liberacao`) lista produto, itens,
+    as duas partes, MGs, data do pedido, início e devolução prevista, pra
+    não sobrar brecha pra dúvida ou erro sobre o que foi combinado."""
+    titulo = f'Empréstimo liberado — {pedido.produto}'
+
+    ja_notificados = set()
+
+    if pedido.solicitante_id:
+        Notificacao.objects.create(
+            destinatario=pedido.solicitante, tipo='pedido_aprovado',
+            titulo=titulo,
+            mensagem=f'Seu pedido de "{pedido.produto}" foi aprovado.' + (
+                f' Devolução prevista para {_fmt_data(pedido.dev_iso)}.' if pedido.dev_iso else ''
+            ),
+            pedido_id=pedido.id,
+        )
+        _enviar_email_bruto(pedido.solicitante, titulo, _corpo_liberacao(pedido, 'solicitante'))
+        ja_notificados.add(pedido.solicitante_id)
+
+    if pedido.concedente_id and pedido.concedente_id not in ja_notificados:
+        Notificacao.objects.create(
+            destinatario=pedido.concedente, tipo='pedido_aprovado',
+            titulo=titulo,
+            mensagem=f'O empréstimo de "{pedido.produto}" para {pedido.solicitante_nome or "—"} foi liberado.',
+            pedido_id=pedido.id,
+        )
+        _enviar_email_bruto(pedido.concedente, titulo, _corpo_liberacao(pedido, 'concedente'))
+        ja_notificados.add(pedido.concedente_id)
 
 
 def notificar_recusado(pedido):
@@ -207,27 +395,45 @@ def notificar_devolvido(pedido):
 
 
 def notificar_prazo_estendido(pedido, motivo='', prazo_anterior=None):
-    """Ao estender o prazo de devolução: avisa quem solicitou (com a nova
-    data) e os gestores do MG concedente — é o armazém deles que segue
-    aguardando o material de volta."""
-    partes = [f'A devolução de "{pedido.produto}" foi adiada']
-    if pedido.dev_iso:
-        partes.append(f' para {_fmt_data(pedido.dev_iso)}')
-    partes.append('.')
-    if prazo_anterior:
-        partes.append(f' Prazo anterior: {_fmt_data(prazo_anterior)}.')
-    if motivo:
-        partes.append(f' Motivo: {motivo}.')
-    msg = ''.join(partes)
+    """Ao estender o prazo de devolução: avisa as DUAS pessoas marcadas no
+    pedido — solicitante e concedente — cada uma com um e-mail completo
+    (prazo anterior, novo prazo, motivo e todos os dados do empréstimo)
+    pro e-mail de login dela. Também avisa os gestores do MG concedente,
+    que seguem aguardando o material de volta."""
+    titulo = f'Prazo de devolução estendido — {pedido.produto}'
 
     ja_notificados = set()
-    _criar(
-        pedido.solicitante, 'sistema',
-        f'Prazo estendido — {pedido.produto}',
-        msg, pedido.id, pedido=pedido,
-    )
+
     if pedido.solicitante_id:
+        msg_curta = f'A devolução de "{pedido.produto}" foi adiada' + (
+            f' para {_fmt_data(pedido.dev_iso)}.' if pedido.dev_iso else '.'
+        )
+        if motivo:
+            msg_curta += f' Motivo: {motivo}.'
+        Notificacao.objects.create(
+            destinatario=pedido.solicitante, tipo='sistema',
+            titulo=titulo, mensagem=msg_curta, pedido_id=pedido.id,
+        )
+        _enviar_email_bruto(
+            pedido.solicitante, titulo,
+            _corpo_extensao(pedido, 'solicitante', motivo=motivo, prazo_anterior=prazo_anterior),
+        )
         ja_notificados.add(pedido.solicitante_id)
+
+    if pedido.concedente_id and pedido.concedente_id not in ja_notificados:
+        Notificacao.objects.create(
+            destinatario=pedido.concedente, tipo='sistema',
+            titulo=titulo,
+            mensagem=f'O prazo de devolução de "{pedido.produto}" ({pedido.solicitante_nome or "—"}) foi estendido' + (
+                f' para {_fmt_data(pedido.dev_iso)}.' if pedido.dev_iso else '.'
+            ),
+            pedido_id=pedido.id,
+        )
+        _enviar_email_bruto(
+            pedido.concedente, titulo,
+            _corpo_extensao(pedido, 'concedente', motivo=motivo, prazo_anterior=prazo_anterior),
+        )
+        ja_notificados.add(pedido.concedente_id)
 
     for gestor in _gestores_do_mg(pedido.mg_concedente):
         if gestor.id in ja_notificados:
