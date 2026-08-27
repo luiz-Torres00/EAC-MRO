@@ -4,9 +4,10 @@ Regras de notificação do fluxo de empréstimos.
 Centraliza aqui quem recebe notificação em cada evento de um Pedido, para não
 espalhar essa lógica pelas views. Chamado a partir de pedidos/views.py.
 """
+import html
 import logging
+import requests
 from django.conf import settings
-from django.core.mail import send_mail
 from .models import Notificacao
 
 logger = logging.getLogger(__name__)
@@ -178,22 +179,76 @@ def _corpo_extensao(pedido, papel, motivo='', prazo_anterior=None):
     return '\n'.join(linhas)
 
 
+def _remetente():
+    """Extrai nome e e-mail de DEFAULT_FROM_EMAIL (aceita tanto o formato
+    "Nome <email>" quanto só "email"), no formato que a API do Brevo espera."""
+    from email.utils import parseaddr
+    nome, email = parseaddr(settings.DEFAULT_FROM_EMAIL)
+    return {'name': nome or 'EAC MRO', 'email': email or settings.DEFAULT_FROM_EMAIL}
+
+
+def _enviar_via_brevo(email_destino, nome_destino, titulo, corpo):
+    """Envia o e-mail pela API HTTP do Brevo (https://api.brevo.com/v3/smtp/email)
+    em vez de por SMTP.
+
+    A Render bloqueia todo tráfego de saída pelas portas de SMTP (25, 465 e
+    587) nos serviços do plano gratuito desde set/2025 — então tentar usar
+    SMTP (mesmo com host/senha corretos) trava a conexão até estourar o
+    timeout, sem nunca conseguir enviar. A API do Brevo funciona por HTTPS
+    (porta 443, a mesma usada por qualquer site), que não é bloqueada —
+    então é o jeito de continuar mandando e-mail sem precisar de um plano
+    pago no Render. Precisa da variável BREVO_API_KEY configurada (é a
+    "API Key" do Brevo, na aba SMTP & API — diferente da "chave SMTP" usada
+    antes).
+    """
+    if not email_destino:
+        return
+    if not settings.BREVO_API_KEY:
+        logger.warning(
+            'BREVO_API_KEY não configurada — e-mail "%s" não enviado para %s.',
+            titulo, email_destino,
+        )
+        return
+    corpo_html = (
+        '<pre style="font-family: monospace; white-space: pre-wrap; font-size: 14px">'
+        + html.escape(corpo) + '</pre>'
+    )
+    try:
+        resp = requests.post(
+            'https://api.brevo.com/v3/smtp/email',
+            headers={
+                'accept':       'application/json',
+                'api-key':      settings.BREVO_API_KEY,
+                'content-type': 'application/json',
+            },
+            json={
+                'sender':      _remetente(),
+                'to':          [{'email': email_destino, 'name': nome_destino or email_destino}],
+                'subject':     titulo,
+                'textContent': corpo,
+                'htmlContent': corpo_html,
+            },
+            timeout=10,
+        )
+        if resp.status_code >= 300:
+            logger.error(
+                'Brevo recusou o e-mail "%s" para %s: %s %s',
+                titulo, email_destino, resp.status_code, resp.text,
+            )
+    except Exception:
+        # Nunca deixa um problema de e-mail (Brevo fora do ar, chave errada
+        # etc.) quebrar o fluxo de criação/aprovação do pedido — a
+        # notificação in-app já foi criada, o e-mail é um "a mais".
+        logger.exception('Falha ao enviar e-mail (Brevo API) para %s', email_destino)
+
+
 def _enviar_email_bruto(destinatario, titulo, corpo):
     """Como `_enviar_email`, mas envia `corpo` exatamente como veio — sem
     passar pelo `_corpo_email` genérico. Usado quando o corpo já foi
     montado sob medida pro evento (ex.: liberação do empréstimo)."""
     if not destinatario or not destinatario.email:
         return
-    try:
-        send_mail(
-            subject=titulo,
-            message=corpo,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[destinatario.email],
-            fail_silently=True,
-        )
-    except Exception:
-        logger.exception('Falha ao enviar e-mail de liberação para %s', destinatario.email)
+    _enviar_via_brevo(destinatario.email, destinatario.nome, titulo, corpo)
 
 
 def _corpo_email(pedido, mensagem):
@@ -224,19 +279,7 @@ def _corpo_email(pedido, mensagem):
 def _enviar_email(destinatario, titulo, mensagem, pedido=None):
     if not destinatario or not destinatario.email:
         return
-    try:
-        send_mail(
-            subject=titulo,
-            message=_corpo_email(pedido, mensagem),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[destinatario.email],
-            fail_silently=True,
-        )
-    except Exception:
-        # Nunca deixa um problema de e-mail (SMTP fora do ar, credencial
-        # errada etc.) quebrar o fluxo de criação/aprovação do pedido — a
-        # notificação in-app já foi criada, o e-mail é um "a mais".
-        logger.exception('Falha ao enviar e-mail de notificação para %s', destinatario.email)
+    _enviar_via_brevo(destinatario.email, destinatario.nome, titulo, _corpo_email(pedido, mensagem))
 
 
 def _criar(destinatario, tipo, titulo, mensagem, pedido_id=None, pedido=None):

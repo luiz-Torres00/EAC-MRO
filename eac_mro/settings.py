@@ -158,4 +158,11 @@ else:
 
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'EAC MRO <nao-responda@mro.com>')
 
+# A Render bloqueia as portas de SMTP (25/465/587) nos serviços do plano
+# gratuito desde set/2025, então o envio de e-mail (em notificacoes/services.py)
+# usa a API HTTP do Brevo em vez de SMTP — não depende mais de EMAIL_HOST e
+# companhia acima. BREVO_API_KEY é a "API Key" do Brevo (aba SMTP & API),
+# diferente da chave SMTP usada antes.
+BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
