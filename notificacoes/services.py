@@ -101,6 +101,9 @@ def _corpo_liberacao(pedido, papel):
     ]
     if pedido.observacao:
         linhas += ['', f'Observação: {pedido.observacao}']
+    if pedido.fotos:
+        qtd = len(pedido.fotos)
+        linhas += ['', f'Fotos em anexo: {qtd} (registro do material no momento do pedido).']
     linhas += [
         '', '=' * 44,
         'Se alguma dessas informações estiver errada, fale com quem aprovou o pedido '
@@ -187,7 +190,31 @@ def _remetente():
     return {'name': nome or 'EAC MRO', 'email': email or settings.DEFAULT_FROM_EMAIL}
 
 
-def _enviar_via_brevo(email_destino, nome_destino, titulo, corpo):
+def _anexos_de_fotos(pedido):
+    """Converte `pedido.fotos` (lista de data URLs, ex.:
+    "data:image/jpeg;base64,/9j/4AAQ...", exatamente como o frontend salva ao
+    tirar/anexar foto — ver ModalNovoPedido.vue) no formato de anexo que a
+    API do Brevo espera (`{"name": ..., "content": <base64 sem o prefixo
+    data:...;base64,>"}`).
+
+    Qualquer foto que não estiver nesse formato é simplesmente ignorada —
+    anexo é um "a mais" no e-mail, nunca motivo pra travar o envio (a mesma
+    filosofia do resto deste arquivo: notificação por e-mail nunca pode
+    quebrar o fluxo do pedido).
+    """
+    anexos = []
+    for i, foto in enumerate(pedido.fotos or []):
+        if not isinstance(foto, str) or ';base64,' not in foto:
+            continue
+        cabecalho, conteudo = foto.split(';base64,', 1)
+        extensao = cabecalho.split('/')[-1].split('+')[0] if '/' in cabecalho else 'jpg'
+        if not extensao.isalnum():
+            extensao = 'jpg'
+        anexos.append({'name': f'foto-{i + 1}.{extensao}', 'content': conteudo})
+    return anexos
+
+
+def _enviar_via_brevo(email_destino, nome_destino, titulo, corpo, anexos=None):
     """Envia o e-mail pela API HTTP do Brevo (https://api.brevo.com/v3/smtp/email)
     em vez de por SMTP.
 
@@ -200,6 +227,10 @@ def _enviar_via_brevo(email_destino, nome_destino, titulo, corpo):
     pago no Render. Precisa da variável BREVO_API_KEY configurada (é a
     "API Key" do Brevo, na aba SMTP & API — diferente da "chave SMTP" usada
     antes).
+
+    `anexos`, quando informado, é uma lista no formato de `_anexos_de_fotos`
+    — vai no campo `attachment` da própria chamada de API do Brevo, sem
+    custo nem serviço adicional (o plano gratuito do Brevo já aceita anexo).
     """
     if not email_destino:
         return
@@ -213,6 +244,15 @@ def _enviar_via_brevo(email_destino, nome_destino, titulo, corpo):
         '<pre style="font-family: monospace; white-space: pre-wrap; font-size: 14px">'
         + html.escape(corpo) + '</pre>'
     )
+    payload = {
+        'sender':      _remetente(),
+        'to':          [{'email': email_destino, 'name': nome_destino or email_destino}],
+        'subject':     titulo,
+        'textContent': corpo,
+        'htmlContent': corpo_html,
+    }
+    if anexos:
+        payload['attachment'] = anexos
     try:
         resp = requests.post(
             'https://api.brevo.com/v3/smtp/email',
@@ -221,14 +261,10 @@ def _enviar_via_brevo(email_destino, nome_destino, titulo, corpo):
                 'api-key':      settings.BREVO_API_KEY,
                 'content-type': 'application/json',
             },
-            json={
-                'sender':      _remetente(),
-                'to':          [{'email': email_destino, 'name': nome_destino or email_destino}],
-                'subject':     titulo,
-                'textContent': corpo,
-                'htmlContent': corpo_html,
-            },
-            timeout=10,
+            json=payload,
+            # Com anexo o corpo da chamada fica maior (fotos em base64), então
+            # dá mais fôlego que os 10s padrão antes de desistir.
+            timeout=20 if anexos else 10,
         )
         if resp.status_code >= 300:
             logger.error(
@@ -242,13 +278,13 @@ def _enviar_via_brevo(email_destino, nome_destino, titulo, corpo):
         logger.exception('Falha ao enviar e-mail (Brevo API) para %s', email_destino)
 
 
-def _enviar_email_bruto(destinatario, titulo, corpo):
+def _enviar_email_bruto(destinatario, titulo, corpo, anexos=None):
     """Como `_enviar_email`, mas envia `corpo` exatamente como veio — sem
     passar pelo `_corpo_email` genérico. Usado quando o corpo já foi
     montado sob medida pro evento (ex.: liberação do empréstimo)."""
     if not destinatario or not destinatario.email:
         return
-    _enviar_via_brevo(destinatario.email, destinatario.nome, titulo, corpo)
+    _enviar_via_brevo(destinatario.email, destinatario.nome, titulo, corpo, anexos=anexos)
 
 
 def _corpo_email(pedido, mensagem):
@@ -343,6 +379,12 @@ def notificar_aprovado(pedido):
     não sobrar brecha pra dúvida ou erro sobre o que foi combinado."""
     titulo = f'Empréstimo liberado — {pedido.produto}'
 
+    # As fotos anexadas pelo solicitante na criação do pedido (registro do
+    # estado do material) vão junto nos dois e-mails, como anexo de
+    # verdade — não só citadas em texto. Monta uma vez só e reusa nos dois
+    # envios, pra não converter a mesma lista de fotos duas vezes.
+    anexos = _anexos_de_fotos(pedido)
+
     ja_notificados = set()
 
     if pedido.solicitante_id:
@@ -354,7 +396,7 @@ def notificar_aprovado(pedido):
             ),
             pedido_id=pedido.id,
         )
-        _enviar_email_bruto(pedido.solicitante, titulo, _corpo_liberacao(pedido, 'solicitante'))
+        _enviar_email_bruto(pedido.solicitante, titulo, _corpo_liberacao(pedido, 'solicitante'), anexos=anexos)
         ja_notificados.add(pedido.solicitante_id)
 
     if pedido.concedente_id and pedido.concedente_id not in ja_notificados:
@@ -364,7 +406,7 @@ def notificar_aprovado(pedido):
             mensagem=f'O empréstimo de "{pedido.produto}" para {pedido.solicitante_nome or "—"} foi liberado.',
             pedido_id=pedido.id,
         )
-        _enviar_email_bruto(pedido.concedente, titulo, _corpo_liberacao(pedido, 'concedente'))
+        _enviar_email_bruto(pedido.concedente, titulo, _corpo_liberacao(pedido, 'concedente'), anexos=anexos)
         ja_notificados.add(pedido.concedente_id)
 
 
