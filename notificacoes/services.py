@@ -582,3 +582,49 @@ def notificar_cobranca_devolucao(pedido, tom='gentil', mensagem=''):
             pedido.id, pedido=pedido,
         )
         ja_notificados.add(gestor.id)
+
+
+def notificar_lembrete_devolucao(pedido, dias_restantes):
+    """Lembrete automático e diário de devolução — chamado 1x por dia (ver
+    `pedidos/views.py::processar_lembretes_devolucao`, disparado por um
+    agendamento externo, não pelo usuário) pra todo pedido aprovado que está
+    a 3 dias ou menos do prazo de devolução, ou já atrasado. Só o
+    solicitante recebe — é quem está com o material e precisa agir.
+
+    `dias_restantes` é `(dev_iso - hoje).days`: positivo = ainda faltam dias,
+    zero = vence hoje, negativo = já está atrasado há `-dias_restantes`
+    dias. Usado só pra escolher o texto certo do e-mail.
+    """
+    if dias_restantes > 0:
+        prazo_txt = f'faltam {dias_restantes} dia{"s" if dias_restantes != 1 else ""} para a devolução'
+    elif dias_restantes == 0:
+        prazo_txt = 'a devolução vence HOJE'
+    else:
+        atraso = -dias_restantes
+        prazo_txt = f'a devolução está ATRASADA há {atraso} dia{"s" if atraso != 1 else ""}'
+
+    titulo = f'Lembrete de devolução — {pedido.produto}'
+    msg_curta = f'"{pedido.produto}": {prazo_txt} (prazo {_fmt_data(pedido.dev_iso)}).'
+
+    corpo = (
+        f'Olá, {pedido.solicitante_nome or "tudo bem"}!\n\n'
+        f'Este é um lembrete automático: {prazo_txt} do material abaixo, '
+        f'combinado com {pedido.concedente_nome or "o concedente"}.\n\n'
+        + '=' * 44 + '\n'
+        'DADOS DO EMPRÉSTIMO\n'
+        + '=' * 44 + '\n'
+        f'Código:              {pedido.codigo or "—"}\n'
+        f'Produto:             {pedido.produto or "—"}\n'
+        f'Concedente:          {pedido.concedente_nome or "—"} ({pedido.concedente_email or "—"})\n'
+        f'Devolução prevista:  {_fmt_data(pedido.dev_iso)}\n\n'
+        + '=' * 44 + '\n'
+        'Se o material já foi devolvido e este aviso não devia ter chegado, '
+        'confira se a devolução foi registrada no sistema. Se precisar de '
+        'mais prazo, fale com o concedente para estender a data.'
+    )
+
+    Notificacao.objects.create(
+        destinatario=pedido.solicitante, tipo='atraso',
+        titulo=titulo, mensagem=msg_curta, pedido_id=pedido.id,
+    )
+    _enviar_email_bruto(pedido.solicitante, titulo, corpo)

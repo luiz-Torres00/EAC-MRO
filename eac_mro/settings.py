@@ -165,6 +165,14 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'EAC MRO <nao-responda
 # diferente da chave SMTP usada antes.
 BREVO_API_KEY = os.environ.get('BREVO_API_KEY', '')
 
+# Segredo compartilhado do endpoint "de robô" /api/cron/lembretes-devolucao/
+# (ver pedidos/views.py::LembretesDevolucaoView) — chamado 1x por dia por um
+# agendamento externo (GitHub Actions), não por usuário logado. Precisa ser o
+# MESMO valor configurado como secret CRON_SECRET no GitHub do repositório
+# eac-mro-django. Sem essa variável configurada aqui, o endpoint recusa
+# qualquer chamada (nunca fica aberto por acidente).
+CRON_SECRET = os.environ.get('CRON_SECRET', '')
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 # Sem isso, com DEBUG=False (produção), o Django engole o traceback de
 # qualquer erro 500 — o log do Render só mostra a linha de acesso ("POST

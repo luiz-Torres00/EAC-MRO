@@ -3,6 +3,7 @@ from datetime import datetime, time as dtime
 from rest_framework import generics, status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.http import HttpResponse
@@ -10,10 +11,11 @@ from django.http import HttpResponse
 from .models import Pedido, Estudio, LOCALIZACAO_TIPO_CHOICES
 from .serializers import PedidoSerializer, PedidoCreateSerializer, EstudioSerializer
 from .relatorio import gerar_relatorio_xlsx
+from notificacoes.models import Notificacao
 from notificacoes.services import (
     notificar_novo_pedido, notificar_aprovado, notificar_recusado,
     notificar_devolvido, notificar_devolucao_registrada, notificar_prazo_estendido,
-    notificar_ocorrencia_aberta, notificar_cobranca_devolucao,
+    notificar_ocorrencia_aberta, notificar_cobranca_devolucao, notificar_lembrete_devolucao,
 )
 
 TIPOS_OCORRENCIA_VALIDOS = {'Avaria', 'Perda', 'Atraso', 'Incompleto', 'Outro'}
@@ -532,3 +534,58 @@ class RelatorioXlsxView(APIView):
         response['Content-Disposition'] = f'attachment; filename="{nome_arquivo}"'
         wb.save(response)
         return response
+
+
+def processar_lembretes_devolucao():
+    """Varre todo pedido aprovado (material em posse do solicitante) e
+    dispara um lembrete de devolução pra quem está a 3 dias ou menos do
+    prazo — inclusive já atrasado, sem limite de quantos dias. Chamado 1x
+    por dia por um agendamento externo (GitHub Actions, ver
+    `.github/workflows/lembretes-devolucao.yml`), nunca pelo usuário
+    diretamente.
+
+    Evita mandar duas vezes no mesmo dia (o agendamento pode ser disparado
+    de novo manualmente, ou reexecutado depois de uma falha) checando se já
+    existe uma Notificacao tipo "atraso" pra esse pedido criada hoje —
+    reaproveita o tipo que já existia no model em vez de criar uma tabela/
+    coluna nova só pra isso.
+    """
+    hoje = timezone.now().date()
+    enviados = 0
+    pedidos = Pedido.objects.filter(
+        status='aprovado', dev_iso__isnull=False, solicitante__isnull=False,
+    )
+    for pedido in pedidos:
+        dias_restantes = (pedido.dev_iso - hoje).days
+        if dias_restantes > 3:
+            continue
+        ja_hoje = Notificacao.objects.filter(
+            destinatario_id=pedido.solicitante_id, pedido_id=pedido.id,
+            tipo='atraso', criado_em__date=hoje,
+        ).exists()
+        if ja_hoje:
+            continue
+        notificar_lembrete_devolucao(pedido, dias_restantes)
+        enviados += 1
+    return enviados
+
+
+class LembretesDevolucaoView(APIView):
+    """POST /api/cron/lembretes-devolucao/
+
+    Endpoint "de robô" — não é chamado pelo frontend nem por nenhum usuário
+    logado, e sim 1x por dia por um agendamento externo gratuito (GitHub
+    Actions, já que o Render free não tem cron job). Por isso não usa
+    autenticação de usuário (`IsAuthenticated`) e sim um segredo compartilhado
+    fixo, enviado no header `X-Cron-Secret` e comparado com a variável de
+    ambiente `CRON_SECRET` — sem ela configurada (ou errada), recusa com 403.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        segredo_esperado = settings.CRON_SECRET
+        if not segredo_esperado or request.headers.get('X-Cron-Secret') != segredo_esperado:
+            return Response({'detail': 'Não autorizado.'}, status=403)
+
+        enviados = processar_lembretes_devolucao()
+        return Response({'lembretes_enviados': enviados})

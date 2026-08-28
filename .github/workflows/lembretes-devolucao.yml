@@ -1,0 +1,30 @@
+name: Lembrete diário de devolução
+
+# Dispara o endpoint /api/cron/lembretes-devolucao/ do backend 1x por dia.
+# O backend decide sozinho quem recebe e-mail nesse dia (pedidos a 3 dias ou
+# menos do prazo de devolução, ou já atrasados) — este workflow só "bate na
+# porta" no horário certo. Existe porque o Render, no plano gratuito, não
+# tem cron job embutido; o GitHub Actions oferece isso de graça.
+on:
+  schedule:
+    # 11:00 UTC = 08:00 no horário de Brasília (UTC-3, sem horário de verão
+    # atualmente no Brasil).
+    - cron: '0 11 * * *'
+  workflow_dispatch: {}   # permite disparar manualmente pela aba Actions, pra testar
+
+jobs:
+  chamar-lembretes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar endpoint de lembretes de devolução
+        run: |
+          resposta=$(curl -sS -X POST \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP_STATUS:%{http_code}" \
+            https://eac-mro-backend.onrender.com/api/cron/lembretes-devolucao/)
+          echo "$resposta"
+          status=$(echo "$resposta" | grep "HTTP_STATUS" | cut -d: -f2)
+          if [ "$status" != "200" ]; then
+            echo "Endpoint respondeu com status $status — falhando o job."
+            exit 1
+          fi
